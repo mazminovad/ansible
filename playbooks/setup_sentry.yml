@@ -1,0 +1,7 @@
+- hosts: sentry_servers
+  become: yes
+  roles:
+    - common
+    - docker
+    - nginx
+    - sentry

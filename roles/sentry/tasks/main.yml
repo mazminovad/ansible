@@ -1,0 +1,138 @@
+- name: Clone Sentry repository
+  git:
+    repo: 'https://github.com/getsentry/self-hosted'
+    dest: /root/sentry
+    force: yes
+    update: yes
+  tags: sentry
+
+- name: Create Docker network for Sentry
+  command: docker network create sentry-self-hosted_default
+  ignore_errors: yes
+  tags: sentry
+
+- name: Set environment variable to suppress prompts
+  lineinfile:
+    path: /root/sentry/.env
+    line: "REPORT_SELF_HOSTED_ISSUES=0"
+    create: yes
+  tags: sentry
+
+- name: Stop existing Docker containers
+  shell: |
+    cd /root/sentry
+    docker-compose down || true
+  args:
+    executable: /bin/bash
+  tags: sentry
+
+- name: Configure Sentry with install.sh
+  expect:
+    command: ./install.sh --no-user-prompt
+    responses:
+      "Would you like to create a user account now? [Y/n]:": "n\r"
+  args:
+    chdir: /root/sentry
+    timeout: 1200  # Увеличение таймаута до 20 минут
+  tags: sentry
+
+- name: Create Sentry superuser
+  shell: |
+    cd /root/sentry
+    docker-compose run --rm web createuser --superuser --email devops-group@expero.ru --password R2U1OqA7Ih
+  args:
+    executable: /bin/bash
+  tags: sentry
+
+- name: Ensure RabbitMQ service is defined in docker-compose.yml
+  become: yes
+  become_user: root
+  blockinfile:
+    path: /root/sentry/docker-compose.yml
+    marker: "# {mark} RABBITMQ"
+    block: |
+      rabbitmq:  # New RabbitMQ service
+        <<: *restart_policy
+        image: rabbitmq:3-management
+        ports:
+          - "5672:5672"
+          - "15672:15672"
+        environment:
+          RABBITMQ_DEFAULT_USER: user
+          RABBITMQ_DEFAULT_PASS: password
+        healthcheck:
+          test: ["CMD-SHELL", "rabbitmqctl status"]
+    insertafter: 'services:'
+  tags: rabbitmq
+
+- name: Validate docker-compose.yml
+  become: yes
+  become_user: root
+  command: docker-compose config
+  args:
+    chdir: /root/sentry
+  register: compose_validation
+  failed_when: "'ERROR' in compose_validation.stderr"
+  changed_when: false
+  tags: sentry
+
+- name: Restart Sentry with RabbitMQ and handle orphan containers/network
+  become: yes
+  become_user: root
+  block:
+    - name: Stop Sentry containers and remove orphans
+      command: docker-compose down --remove-orphans
+      args:
+        chdir: /root/sentry
+      register: docker_down_result
+      ignore_errors: yes
+
+    - name: Handle network removal if needed
+      block:
+        - name: Remove Sentry network if it exists
+          command: docker network rm sentry-self-hosted_default
+          ignore_errors: yes
+      when: docker_down_result.rc != 0 and "'error while removing network' in docker_down_result.stderr"
+
+    - name: Start Sentry with RabbitMQ
+      command: docker-compose up -d
+      args:
+        chdir: /root/sentry
+      async: 1200
+      poll: 0
+  tags: sentry
+
+- name: Check if any containers are running
+  shell: docker ps
+  register: docker_ps_result
+  changed_when: false
+  tags: sentry
+
+- name: Ensure containers are running
+  fail:
+    msg: "No containers are running!"
+  when: docker_ps_result.stdout == ""
+  tags: sentry
+
+- name: Display running containers
+  debug:
+    msg: "Running containers: {{ docker_ps_result.stdout }}"
+  tags: sentry
+
+- name: Check health status of containers
+  shell: |
+    docker ps --filter "status=running" --format "{{.ID}}" | xargs -I {} docker inspect --format "{{.ID}}: {{.State.Health.Status}}" {}
+  register: container_health
+  changed_when: false
+  tags: sentry
+
+- name: Log unhealthy containers
+  debug:
+    msg: "Unhealthy containers: {{ container_health.stdout }}"
+  when: "'unhealthy' in container_health.stdout"
+  tags: sentry
+
+- name: Log playbook completion
+  debug:
+    msg: "Sentry setup and configuration completed successfully"
+  tags: sentry

@@ -1,0 +1,2 @@
+[sentry_servers]
+10.10.3.162 ansible_user=root ansible_ssh_private_key_file=~/.ssh/pharma ansible_ssh_common_args='-o ProxyCommand="ssh -i ~/.ssh/pharma -W %h:%p root@178.170.242.194"'

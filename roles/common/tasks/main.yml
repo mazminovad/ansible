@@ -1,0 +1,12 @@
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Install common dependencies
+  apt:
+    name:
+      - git
+      - curl
+      - python3
+      - python3-pip
+    state: present

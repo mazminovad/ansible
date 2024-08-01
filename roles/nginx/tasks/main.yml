@@ -1,0 +1,26 @@
+- name: Install Nginx
+  apt:
+    name: nginx
+    state: present
+
+- name: Copy Nginx config
+  template:
+    src: nginx-sentry.conf.j2
+    dest: /etc/nginx/sites-available/sentry
+    mode: '0644'
+
+- name: Enable Nginx config
+  file:
+    src: /etc/nginx/sites-available/sentry
+    dest: /etc/nginx/sites-enabled/sentry
+    state: link
+
+- name: Remove default Nginx config
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Restart Nginx
+  systemd:
+    name: nginx
+    state: restarted

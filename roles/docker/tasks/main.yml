@@ -1,0 +1,69 @@
+- name: Check if Docker is already installed
+  command: docker --version
+  register: docker_installed
+  ignore_errors: true
+  changed_when: false
+
+- name: Check if Docker Compose is already installed
+  command: docker-compose --version
+  register: docker_compose_installed
+  ignore_errors: true
+  changed_when: false
+
+- name: Install Docker dependencies
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+  when: docker_installed.failed
+  tags: docker
+
+- name: Add Docker official GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  when: docker_installed.failed
+  tags: docker
+
+- name: Add Docker repository
+  apt_repository:
+    repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    state: present
+  when: docker_installed.failed
+  tags: docker
+
+- name: Install Docker Engine
+  apt:
+    name: docker-ce
+    state: present
+  when: docker_installed.failed
+  tags: docker
+
+- name: Add user to docker group
+  user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+  when: docker_installed.failed
+  tags: docker
+
+- name: Download Docker Compose binary
+  get_url:
+    url: https://github.com/docker/compose/releases/download/1.29.2/docker-compose-Linux-x86_64
+    dest: /usr/local/bin/docker-compose
+    mode: '0755'
+  when: docker_compose_installed.failed
+  tags: docker
+
+- name: Start Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+  when: docker_installed.failed
+  tags: docker
